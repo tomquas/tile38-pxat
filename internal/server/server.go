@@ -67,6 +67,11 @@ type commandDetails struct {
 	parent    bool              // when true, only children are forwarded
 	pattern   string            // PDEL key pattern
 	children  []*commandDetails // for multi actions such as "PDEL"
+
+	// aofArgs, when not nil, is written to the AOF instead of the client's
+	// arguments. Used to persist a relative expiration (EX) as an absolute one
+	// (PXAT), so that replaying the AOF does not restart it.
+	aofArgs []string
 }
 
 type rwlocker interface {

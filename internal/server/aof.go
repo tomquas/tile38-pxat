@@ -150,6 +150,9 @@ func (s *Server) writeAOF(args []string, d *commandDetails) error {
 		// just ignore writes if the command did not update
 		return nil
 	}
+	if d != nil && d.aofArgs != nil {
+		args = d.aofArgs
+	}
 
 	if s.shrinking {
 		nargs := make([]string, len(args))

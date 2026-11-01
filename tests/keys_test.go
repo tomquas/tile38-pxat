@@ -24,6 +24,7 @@ func subTestKeys(g *testGroup) {
 	g.regSubTest("KEYS", keys_KEYS_test)
 	g.regSubTest("PERSIST", keys_PERSIST_test)
 	g.regSubTest("SET", keys_SET_test)
+	g.regSubTest("SET PXAT", keys_SET_PXAT_test)
 	g.regSubTest("STATS", keys_STATS_test)
 	g.regSubTest("TTL", keys_TTL_test)
 	g.regSubTest("EXIST", keys_EXISTS_test)

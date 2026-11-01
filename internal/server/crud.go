@@ -640,8 +640,8 @@ func (s *Server) cmdFLUSHDB(msg *Message) (resp.Value, commandDetails, error) {
 	return res, d, nil
 }
 
-// SET key id [FIELD name value ...] [EX seconds] [NX|XX]
-// (OBJECT geojson)|(POINT lat lon z)|(BOUNDS minlat minlon maxlat maxlon)|
+// SET key id [FIELD name value ...] [EX seconds|PXAT unix-time-milliseconds]
+// [NX|XX] (OBJECT geojson)|(POINT lat lon z)|(BOUNDS minlat minlon maxlat maxlon)|
 // (HASH geohash)|(STRING value)
 func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 	start := time.Now()
@@ -655,6 +655,7 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 	var id string
 	var fields []field.Field
 	var ex int64
+	exAt := -1 // index of a relative expiration (EX), rewritten for the AOF
 	var xx bool
 	var nx bool
 	var ret bool
@@ -694,6 +695,19 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 				return retwerr(errInvalidArgument(exval))
 			}
 			ex = time.Now().UnixNano() + int64(float64(time.Second)*x)
+			exAt = i - 1
+		case "pxat":
+			// The last of EX and PXAT wins, as with repeated EX.
+			if i+1 >= len(args) {
+				return retwerr(errInvalidNumberOfArguments)
+			}
+			pxval := args[i+1]
+			i += 1
+			var ok bool
+			if ex, ok = parsePXAT(pxval); !ok {
+				return retwerr(errInvalidArgument(pxval))
+			}
+			exAt = -1
 		case "nx":
 			if xx {
 				return retwerr(errInvalidArgument(args[i]))
@@ -861,6 +875,31 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 		return resp.NullValue(), commandDetails{}, nil
 	}
 
+	if ex != 0 && s.alreadyExpired(ex) {
+		// Inserting an object that is already expired would only have it
+		// deleted again by the background expiration. Do the delete now.
+		var exists bool
+		if col, ok := s.cols.Get(key); ok {
+			exists = col.Get(id) != nil
+		}
+		if (xx && !exists) || (nx && exists) {
+			return nada()
+		}
+		d := expiredDetails(key, id, s.expireNow(key, id))
+		var res resp.Value
+		switch msg.OutputType {
+		case JSON:
+			res = resp.StringValue(`{"ok":true,"elapsed":"` + time.Since(start).String() + "\"}")
+		case RESP:
+			if ret {
+				res = resp.NullValue()
+			} else {
+				res = resp.SimpleStringValue("OK")
+			}
+		}
+		return res, d, nil
+	}
+
 	col, ok := s.cols.Get(key)
 	if !ok {
 		if xx {
@@ -901,6 +940,9 @@ func (s *Server) cmdSET(msg *Message) (resp.Value, commandDetails, error) {
 	d.old = old
 	d.updated = true // perhaps we should do a diff on the previous object?
 	d.timestamp = time.Now()
+	if exAt >= 0 {
+		d.aofArgs = withAbsoluteExpiry(args, exAt, "pxat", ex)
+	}
 
 	if ret {
 		res := buildObjectResponse(msg, obj, start, kind, precision, withfields, msg.OutputType == JSON)
