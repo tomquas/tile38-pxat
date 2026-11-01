@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 // respCmd encodes args as one AOF command.
@@ -199,6 +201,64 @@ func aof_PEXPIREAT_test(mc *mockServer) error {
 		return fmt.Errorf("expected the aof to end with %q", want)
 	}
 	return mc.DoBatch(Do("FLUSHDB").OK())
+}
+
+// chanCount checks the number of channels in a JSON CHANS reply.
+func chanCount(n int64) func(s string) error {
+	return func(s string) error {
+		if got := gjson.Get(s, "chans.#").Int(); got != n {
+			return fmt.Errorf("expected %d chans, got %d", n, got)
+		}
+		return nil
+	}
+}
+
+func aof_SETCHAN_PXAT_test(mc *mockServer) error {
+	// EX is written as an absolute PXAT, every other argument as sent
+	before := time.Now()
+	if _, err := mc.Do("SETCHAN", "chan1", "EX", 60, "INTERSECTS", "fleet", "BOUNDS", 10, 10, 20, 20); err != nil {
+		return err
+	}
+	if err := pxatNear(mc, before, time.Minute); err != nil {
+		return err
+	}
+	aof, err := mc.readAOF()
+	if err != nil {
+		return err
+	}
+	ms, _ := lastPXAT(aof)
+	want := respCmd("SETCHAN", "chan1", "pxat", strconv.FormatInt(ms, 10), "INTERSECTS", "fleet", "BOUNDS", "10", "10", "20", "20")
+	if !bytes.HasSuffix(aof, []byte(want)) {
+		return fmt.Errorf("expected the aof to end with %q", want)
+	}
+	if err := mc.DoBatch(
+		Do("SETCHAN", "chan2", "PXAT", "abc", "INTERSECTS", "fleet", "BOUNDS", 10, 10, 20, 20).Err("invalid argument 'abc'"),
+		Do("SETCHAN", "chan2", "PXAT", pxat(time.Minute), "INTERSECTS", "fleet", "BOUNDS", 10, 10, 20, 20).Str("1"),
+		Do("SETCHAN", "chan3", "PXAT", pxat(-time.Minute), "INTERSECTS", "fleet", "BOUNDS", 10, 10, 20, 20).Str("1"),
+	); err != nil {
+		return err
+	}
+	time.Sleep(bgExpireWait)
+	return mc.DoBatch(
+		Do("CHANS", "*").JSON().Func(chanCount(2)),
+		Do("DELCHAN", "chan1").Str("1"),
+		Do("DELCHAN", "chan2").Str("1"),
+	)
+}
+
+func aof_SETCHAN_PXAT_replay_test(mc *mockServer) error {
+	aof := respCmd("SETCHAN", "gone", "PXAT", pxat(-time.Minute), "INTERSECTS", "fleet", "BOUNDS", "10", "10", "20", "20") +
+		respCmd("SETCHAN", "kept", "PXAT", pxat(time.Minute), "INTERSECTS", "fleet", "BOUNDS", "10", "10", "20", "20")
+	mc2, err := loadAOF(aof)
+	if err != nil {
+		return err
+	}
+	defer mc2.Close()
+	time.Sleep(bgExpireWait)
+	return mc2.DoBatch(
+		Do("CHANS", "*").JSON().Func(chanCount(1)),
+		Do("CHANS", "kept").JSON().Func(chanCount(1)),
+	)
 }
 
 // bgExpireWait covers a few runs of the background expiration (every 100ms).

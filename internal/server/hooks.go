@@ -59,6 +59,8 @@ func (s *Server) cmdSetHook(msg *Message) (
 	var types map[string]bool
 	var expires float64
 	var expiresSet bool
+	var expiresAt int64 // PXAT, in unix nanoseconds
+	exAt := -1          // index of a relative expiration (EX), for the AOF
 	metaMap := make(map[string]string)
 	for {
 		commandvs = vs
@@ -91,6 +93,20 @@ func (s *Server) cmdSetHook(msg *Message) (
 			}
 			expires = v
 			expiresSet = true
+			expiresAt = 0
+			exAt = len(msg.Args) - len(vs) - 2
+			continue
+		case "pxat":
+			// The last of EX and PXAT wins, as with repeated EX.
+			var s string
+			if vs, s, ok = tokenval(vs); !ok || s == "" {
+				return NOMessage, d, errInvalidNumberOfArguments
+			}
+			if expiresAt, ok = parsePXAT(s); !ok {
+				return NOMessage, d, errInvalidArgument(s)
+			}
+			expiresSet = false
+			exAt = -1
 			continue
 		case "nearby":
 			types = nearbyTypes
@@ -135,6 +151,8 @@ func (s *Server) cmdSetHook(msg *Message) (
 	if expiresSet {
 		hook.expires =
 			time.Now().Add(time.Duration(expires * float64(time.Second)))
+	} else if expiresAt != 0 {
+		hook.expires = time.Unix(0, expiresAt)
 	}
 	if !channel {
 		hook.db = s.qdb
@@ -179,6 +197,10 @@ func (s *Server) cmdSetHook(msg *Message) (
 
 	d.updated = true
 	d.timestamp = time.Now()
+	if exAt >= 0 {
+		d.aofArgs = withAbsoluteExpiry(msg.Args, exAt, "pxat",
+			hook.expires.UnixNano())
+	}
 
 	s.hooks.Set(hook)
 	if hook.Fence.detect == nil || hook.Fence.detect["outside"] {
