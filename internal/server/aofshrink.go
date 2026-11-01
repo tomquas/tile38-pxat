@@ -1,7 +1,6 @@
 package server
 
 import (
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -90,8 +89,7 @@ func (s *Server) aofshrink() {
 					if !ok {
 						return
 					}
-					var now = time.Now().UnixNano() // used for expiration
-					var count = 0                   // the object count
+					var count = 0 // the object count
 					col.ScanGreaterOrEqual(nextid, false, nil, nil,
 						func(o *object.Object) bool {
 							if count == maxids {
@@ -114,13 +112,11 @@ func (s *Server) aofshrink() {
 								return true
 							})
 							if o.Expires() != 0 {
-								ttl := math.Floor(float64(o.Expires()-now)/float64(time.Second)*10) / 10
-								if ttl < 0.1 {
-									// always leave a little bit of ttl.
-									ttl = 0.1
-								}
-								values = append(values, "ex")
-								values = append(values, strconv.FormatFloat(ttl, 'f', -1, 64))
+								// The absolute deadline, so that loading the
+								// shrunk aof does not restart the expiration.
+								// An object already past it loads expired.
+								values = append(values, "pxat")
+								values = append(values, formatPXAT(o.Expires()))
 							}
 							if objIsSpatial(o.Geo()) {
 								values = append(values, "object")
@@ -194,9 +190,8 @@ func (s *Server) aofshrink() {
 					values = append(values, "meta", meta.Name, meta.Value)
 				}
 				if !hook.expires.IsZero() {
-					ex := float64(time.Until(hook.expires)) / float64(time.Second)
-					values = append(values, "ex",
-						strconv.FormatFloat(ex, 'f', 1, 64))
+					values = append(values, "pxat",
+						formatPXAT(hook.expires.UnixNano()))
 				}
 				values = append(values, hook.Message.Args...)
 				// append the values to the aof buffer

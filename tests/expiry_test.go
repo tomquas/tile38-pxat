@@ -261,6 +261,62 @@ func aof_SETCHAN_PXAT_replay_test(mc *mockServer) error {
 	)
 }
 
+func aof_AOFSHRINK_PXAT_test(mc *mockServer) error {
+	objDeadline := pxat(time.Hour)
+	chanDeadline := pxat(2 * time.Hour)
+	if err := mc.DoBatch(
+		Do("SET", "fleet", "x", "PXAT", objDeadline, "POINT", 33, -115).OK(),
+		Do("SET", "fleet", "y", "EX", 60, "POINT", 33, -115).OK(),
+		Do("SETCHAN", "chan1", "PXAT", chanDeadline, "INTERSECTS", "fleet", "BOUNDS", 10, 10, 20, 20).Str("1"),
+		// gone from the aof once the shrink has replaced it
+		Do("SET", "fleet", "marker", "POINT", 33, -115).OK(),
+		Do("DEL", "fleet", "marker").Str("1"),
+		Do("AOFSHRINK").OK(),
+	); err != nil {
+		return err
+	}
+	var aof []byte
+	for start := time.Now(); ; {
+		var err error
+		if aof, err = mc.readAOF(); err != nil {
+			return err
+		}
+		if !bytes.Contains(aof, []byte("marker")) {
+			break
+		}
+		if time.Since(start) > 5*time.Second {
+			return fmt.Errorf("aofshrink did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// deadlines are written as absolute PXAT, never as a relative EX
+	if bytes.Contains(bytes.ToLower(aof), []byte("$2\r\nex\r\n")) {
+		return fmt.Errorf("expected no ex in the shrunk aof")
+	}
+	for _, d := range []string{objDeadline, chanDeadline} {
+		if !bytes.Contains(aof, []byte(respCmd("pxat", d)[4:])) {
+			return fmt.Errorf("expected pxat %s in the shrunk aof", d)
+		}
+	}
+	// and survive loading the shrunk aof
+	mc2, err := loadAOF(aof)
+	if err != nil {
+		return err
+	}
+	defer mc2.Close()
+	if err := mc2.DoBatch(
+		Do("TTL", "fleet", "x").Func(ttlWithin(3598, 3600)),
+		Do("TTL", "fleet", "y").Func(ttlWithin(58, 60)),
+		Do("CHANS", "*").JSON().Func(chanCount(1)),
+	); err != nil {
+		return err
+	}
+	return mc.DoBatch(
+		Do("DELCHAN", "chan1").Str("1"),
+		Do("FLUSHDB").OK(),
+	)
+}
+
 // bgExpireWait covers a few runs of the background expiration (every 100ms).
 const bgExpireWait = 300 * time.Millisecond
 
