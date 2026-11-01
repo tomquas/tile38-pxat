@@ -1187,7 +1187,7 @@ func (s *Server) handleInputCommand(client *Client, msg *Message) error {
 	case "set", "del", "drop", "fset", "flushdb",
 		"setchan", "pdelchan", "delchan",
 		"sethook", "pdelhook", "delhook",
-		"expire", "persist", "jset", "pdel", "rename", "renamenx":
+		"expire", "pexpireat", "persist", "jset", "pdel", "rename", "renamenx":
 		// write operations
 		write = true
 		s.mu.Lock()
@@ -1365,6 +1365,8 @@ func (s *Server) command(msg *Message, client *Client) (
 		res, err = s.cmdHooks(msg)
 	case "expire":
 		res, d, err = s.cmdEXPIRE(msg)
+	case "pexpireat":
+		res, d, err = s.cmdPEXPIREAT(msg)
 	case "persist":
 		res, d, err = s.cmdPERSIST(msg)
 	case "ttl":

@@ -1155,6 +1155,19 @@ func (s *Server) cmdFGET(msg *Message) (resp.Value, error) {
 
 // EXPIRE key id seconds
 func (s *Server) cmdEXPIRE(msg *Message) (resp.Value, commandDetails, error) {
+	return s.cmdExpireGeneric(msg, false)
+}
+
+// PEXPIREAT key id unix-time-milliseconds
+func (s *Server) cmdPEXPIREAT(msg *Message) (resp.Value, commandDetails, error) {
+	return s.cmdExpireGeneric(msg, true)
+}
+
+// cmdExpireGeneric implements EXPIRE and, when absolute is set, PEXPIREAT.
+// Both are written to the AOF as PEXPIREAT, so a replay keeps the deadline.
+func (s *Server) cmdExpireGeneric(msg *Message, absolute bool) (
+	resp.Value, commandDetails, error,
+) {
 	start := time.Now()
 
 	// >> Args
@@ -1164,37 +1177,56 @@ func (s *Server) cmdEXPIRE(msg *Message) (resp.Value, commandDetails, error) {
 		return retwerr(errInvalidNumberOfArguments)
 	}
 	key, id, svalue := args[1], args[2], args[3]
-	value, err := strconv.ParseFloat(svalue, 64)
-	if err != nil {
-		return retwerr(errInvalidArgument(svalue))
+	var ex int64
+	if absolute {
+		var ok bool
+		if ex, ok = parsePXAT(svalue); !ok {
+			return retwerr(errInvalidArgument(svalue))
+		}
+	} else {
+		value, err := strconv.ParseFloat(svalue, 64)
+		if err != nil {
+			return retwerr(errInvalidArgument(svalue))
+		}
+		ex = time.Now().Add(
+			time.Duration(float64(time.Second) * value)).UnixNano()
 	}
 
 	// >> Operation
 
 	var ok bool
 	var obj *object.Object
+	var expired bool
 	col, _ := s.cols.Get(key)
 	if col != nil {
 		// replace the expiration by getting the old object
-		ex := time.Now().Add(
-			time.Duration(float64(time.Second) * value)).UnixNano()
 		o := col.Get(id)
 		ok = o != nil
 		if ok {
-			obj = object.New(id, o.Geo(), ex, o.Fields())
-			col.Set(obj)
+			if s.alreadyExpired(ex) {
+				expired = true
+				obj = s.expireNow(key, id)
+			} else {
+				obj = object.New(id, o.Geo(), ex, o.Fields())
+				col.Set(obj)
+			}
 		}
 	}
 
 	// >> Response
 
 	var d commandDetails
-	if ok {
+	if ok && expired {
+		d = expiredDetails(key, id, obj)
+	} else if ok {
 		d.key = key
 		d.obj = obj
 		d.command = "expire"
 		d.updated = true
 		d.timestamp = time.Now()
+		if !absolute {
+			d.aofArgs = []string{"pexpireat", key, id, formatPXAT(ex)}
+		}
 	}
 	var res resp.Value
 	switch msg.OutputType {

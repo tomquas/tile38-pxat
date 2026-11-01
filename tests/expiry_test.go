@@ -127,6 +127,80 @@ func aof_PXAT_replay_test(mc *mockServer) error {
 	)
 }
 
+func keys_PEXPIREAT_test(mc *mockServer) error {
+	return mc.DoBatch(
+		Do("SET", "mykey", "myid", "POINT", 33, -115).OK(),
+		Do("PEXPIREAT", "mykey", "myid").Err("wrong number of arguments for 'pexpireat' command"),
+		Do("PEXPIREAT", "mykey", "myid", "abc").Err("invalid argument 'abc'"),
+		Do("PEXPIREAT", "mykey", "myid", "0").Err("invalid argument '0'"),
+		Do("PEXPIREAT", "mykey", "myid", pxat(time.Minute)).Str("1"),
+		Do("TTL", "mykey", "myid").Func(ttlWithin(58, 60)),
+		Do("PEXPIREAT", "mykey", "missing", pxat(time.Minute)).Str("0"),
+		Do("PEXPIREAT", "nokey", "myid", pxat(time.Minute)).Str("0"),
+		Do("PEXPIREAT", "mykey", "missing", pxat(time.Minute)).JSON().Err("id not found"),
+		Do("PEXPIREAT", "nokey", "myid", pxat(time.Minute)).JSON().Err("key not found"),
+
+		// a deadline that has passed removes the object
+		Do("PEXPIREAT", "mykey", "myid", pxat(-time.Minute)).Str("1"),
+		Do("GET", "mykey", "myid").Str("<nil>"),
+
+		// so does EXPIRE with a timeout that has already run out
+		Do("SET", "mykey", "myid", "POINT", 33, -115).OK(),
+		Do("EXPIRE", "mykey", "myid", -1).Str("1"),
+		Do("GET", "mykey", "myid").Str("<nil>"),
+		Do("FLUSHDB").OK(),
+	)
+}
+
+func aof_PEXPIREAT_test(mc *mockServer) error {
+	if _, err := mc.Do("SET", "fleet", "a", "POINT", 33, -115); err != nil {
+		return err
+	}
+	// EXPIRE is written as PEXPIREAT with the absolute deadline
+	before := time.Now()
+	if _, err := mc.Do("EXPIRE", "fleet", "a", 60); err != nil {
+		return err
+	}
+	aof, err := mc.readAOF()
+	if err != nil {
+		return err
+	}
+	re := regexp.MustCompile(`\*4\r\n\$9\r\npexpireat\r\n\$5\r\nfleet\r\n\$1\r\na\r\n\$\d+\r\n(\d+)\r\n$`)
+	m := re.FindSubmatch(aof)
+	if m == nil {
+		return fmt.Errorf("expected the aof to end with pexpireat")
+	}
+	ms, _ := strconv.ParseInt(string(m[1]), 10, 64)
+	lo, hi := before.Add(time.Minute).UnixMilli(), time.Now().Add(time.Minute).UnixMilli()+1
+	if ms < lo || ms > hi {
+		return fmt.Errorf("expected pexpireat in [%d, %d], got %d", lo, hi, ms)
+	}
+	// PEXPIREAT is written unchanged
+	deadline := pxat(time.Hour)
+	if _, err := mc.Do("PEXPIREAT", "fleet", "a", deadline); err != nil {
+		return err
+	}
+	if aof, err = mc.readAOF(); err != nil {
+		return err
+	}
+	want := respCmd("PEXPIREAT", "fleet", "a", deadline)
+	if !bytes.HasSuffix(aof, []byte(want)) {
+		return fmt.Errorf("expected the aof to end with %q", want)
+	}
+	// a deadline that has passed is written as DEL
+	if _, err := mc.Do("PEXPIREAT", "fleet", "a", pxat(-time.Minute)); err != nil {
+		return err
+	}
+	if aof, err = mc.readAOF(); err != nil {
+		return err
+	}
+	want = respCmd("del", "fleet", "a")
+	if !bytes.HasSuffix(aof, []byte(want)) {
+		return fmt.Errorf("expected the aof to end with %q", want)
+	}
+	return mc.DoBatch(Do("FLUSHDB").OK())
+}
+
 // bgExpireWait covers a few runs of the background expiration (every 100ms).
 const bgExpireWait = 300 * time.Millisecond
 

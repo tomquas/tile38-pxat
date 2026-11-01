@@ -641,6 +641,8 @@ func (s *Server) commandInScript(msg *Message) (
 		res, d, err = s.cmdDROP(msg)
 	case "expire":
 		res, d, err = s.cmdEXPIRE(msg)
+	case "pexpireat":
+		res, d, err = s.cmdPEXPIREAT(msg)
 	case "rename":
 		res, d, err = s.cmdRENAME(msg)
 	case "renamenx":
@@ -730,7 +732,7 @@ func (s *Server) luaTile38AtomicRW(msg *Message) (resp.Value, error) {
 	switch msg.Command() {
 	default:
 		return resp.NullValue(), errCmdNotSupported
-	case "set", "del", "drop", "fset", "flushdb", "expire", "persist", "jset", "pdel",
+	case "set", "del", "drop", "fset", "flushdb", "expire", "pexpireat", "persist", "jset", "pdel",
 		"rename", "renamenx":
 		// write operations
 		write = true
@@ -788,7 +790,7 @@ func (s *Server) luaTile38AtomicRO(msg *Message) (resp.Value, error) {
 	default:
 		return resp.NullValue(), errCmdNotSupported
 
-	case "set", "del", "drop", "fset", "flushdb", "expire", "persist", "jset", "pdel",
+	case "set", "del", "drop", "fset", "flushdb", "expire", "pexpireat", "persist", "jset", "pdel",
 		"rename", "renamenx":
 		// write operations
 		return resp.NullValue(), errReadOnly
@@ -832,7 +834,7 @@ func (s *Server) luaTile38NonAtomic(msg *Message) (resp.Value, error) {
 	switch msg.Command() {
 	default:
 		return resp.NullValue(), errCmdNotSupported
-	case "set", "del", "drop", "fset", "flushdb", "expire", "persist", "jset", "pdel",
+	case "set", "del", "drop", "fset", "flushdb", "expire", "pexpireat", "persist", "jset", "pdel",
 		"rename", "renamenx":
 		// write operations
 		write = true

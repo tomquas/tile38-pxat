@@ -27,6 +27,7 @@ func subTestAOF(g *testGroup) {
 	g.regSubTest("READONLY", aof_READONLY_test)
 	g.regSubTest("PXAT", aof_PXAT_test)
 	g.regSubTest("PXAT replay", aof_PXAT_replay_test)
+	g.regSubTest("PEXPIREAT", aof_PEXPIREAT_test)
 }
 
 func loadAOFAndClose(aof any) error {
