@@ -185,11 +185,28 @@ var commandsJSON = `{
         "multiple": true
       },
       {
-        "command": "EX",
-        "name": ["seconds"],
-        "type": ["double"],
+        "name": "expiration",
         "optional": true,
-        "multiple": false
+        "enumargs": [
+          {
+            "name": "EX",
+            "arguments": [
+              {
+                "name": "seconds",
+                "type": "double"
+              }
+            ]
+          },
+          {
+            "name": "PXAT",
+            "arguments": [
+              {
+                "name": "unix-time-milliseconds",
+                "type": "integer"
+              }
+            ]
+          }
+        ]
       },
       {
         "name": "type",
@@ -296,6 +313,26 @@ var commandsJSON = `{
       }
     ],
     "since": "1.0.0",
+    "group": "keys"
+  },
+  "PEXPIREAT": {
+    "summary": "Set the expiration of an id as a unix time in milliseconds",
+    "complexity": "O(1)",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "string"
+      },
+      {
+        "name": "id",
+        "type": "string"
+      },
+      {
+        "name": "unix-time-milliseconds",
+        "type": "integer"
+      }
+    ],
+    "since": "1.39.0",
     "group": "keys"
   },
   "TTL": {
@@ -1598,11 +1635,28 @@ var commandsJSON = `{
         "multiple": true
       },
       {
-        "command": "EX",
-        "name": ["seconds"],
-        "type": ["double"],
+        "name": "expiration",
         "optional": true,
-        "multiple": false
+        "enumargs": [
+          {
+            "name": "EX",
+            "arguments": [
+              {
+                "name": "seconds",
+                "type": "double"
+              }
+            ]
+          },
+          {
+            "name": "PXAT",
+            "arguments": [
+              {
+                "name": "unix-time-milliseconds",
+                "type": "integer"
+              }
+            ]
+          }
+        ]
       },
       {
         "enum": ["NEARBY", "WITHIN", "INTERSECTS"]
@@ -1682,11 +1736,28 @@ var commandsJSON = `{
         "multiple": true
       },
       {
-        "command": "EX",
-        "name": ["seconds"],
-        "type": ["double"],
+        "name": "expiration",
         "optional": true,
-        "multiple": false
+        "enumargs": [
+          {
+            "name": "EX",
+            "arguments": [
+              {
+                "name": "seconds",
+                "type": "double"
+              }
+            ]
+          },
+          {
+            "name": "PXAT",
+            "arguments": [
+              {
+                "name": "unix-time-milliseconds",
+                "type": "integer"
+              }
+            ]
+          }
+        ]
       },
       {
         "enum": ["NEARBY", "WITHIN", "INTERSECTS"]
